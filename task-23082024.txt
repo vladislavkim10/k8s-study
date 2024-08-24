@@ -1,0 +1,678 @@
+
+
+1. **Create namespace** called `p-NAME`.
+
+2. **Create two pods** with image `redis`. Check the readiness of the container with `tcpSocket` type. Redis Port: 6379, deploy to node with `nodeSelector` `redis: true`.
+
+###redis-pods.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis-pod-1
+  namespace: p-vkim
+  labels:
+    app: redis
+spec:
+  containers:
+  - name: redis
+    image: redis
+    ports:
+    - containerPort: 6379
+    readinessProbe:
+      tcpSocket:
+        port: 6379
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  nodeSelector:
+    redis: "true"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis-pod-2
+  namespace: p-vkim
+  labels:
+    app: redis
+spec:
+  containers:
+  - name: redis
+    image: redis
+    ports:
+    - containerPort: 6379
+    readinessProbe:
+      tcpSocket:
+        port: 6379
+      initialDelaySeconds: 5
+      periodSeconds: 10
+  nodeSelector:
+    redis: "true"
+
+
+
+
+
+3. **Create configmap** practice with `http_port=80`, message=`"hello world"`.
+
+###config-map-practice.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: practice
+  namespace: p-vkim
+data:
+  http_port: "80"
+  message: "hello world"
+
+
+
+###kubectl get configmap practice -n p-vkim -o yaml
+
+apiVersion: v1
+data:
+  http_port: "80"
+  message: hello world
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"http_port":"80","message":"hello world"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"practice","namespace":"p-vkim"}}
+  creationTimestamp: "2024-08-23T15:28:48Z"
+  name: practice
+  namespace: p-vkim
+  resourceVersion: "10360229"
+  uid: 3953040f-e5ff-45db-9d1a-5eb37b93a9c7
+
+
+
+
+4. **Create a busybox-echo** pod that echoes 'hello world' and exits. After that, check the logs.
+
+busybox-echo.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox-echo
+  namespace: p-vkim
+spec:
+  containers:
+  - name: busybox
+    image: busybox
+    command: ['sh', '-c', 'echo "hello world"']
+  restartPolicy: Never
+
+
+
+➜  23082024 kubectl logs busybox-echo -n p-vkim
+
+hello world
+
+
+5. **Create deployment** `flask-application` with image `nvrckdown/flask-app:v1`. Add resource:
+
+   ```
+   limits: cpu: 200m memory: 128Mi
+   requests: 100m memory: 64Mi
+   ```
+   Read `CPU` and `MEMORY` from `resourceField` to corresponding envs. Check liveness of container with `httpGet` method, endpoint: `/domain`. Check the result.
+
+
+
+cat flask-app-deployment-23082024.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-application
+  namespace: p-vkim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flask-application
+  template:
+    metadata:
+      labels:
+        app: flask-application
+    spec:
+      containers:
+      - name: flask-container
+        image: nvrbckdown/flask-app:v1
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+        env:
+        - name: CPU_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
+        - name: MEMORY_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.memory
+        - name: CPU_REQUEST
+          valueFrom:
+            resourceFieldRef:
+              resource: requests.cpu
+        - name: MEMORY_REQUEST
+          valueFrom:
+            resourceFieldRef:
+              resource: requests.memory
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /domain
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+
+
+➜  23082024 k get pods -n p-vkim                         
+NAME                                 READY   STATUS      RESTARTS   AGE
+busybox-echo                         0/1     Completed   0          8m30s
+flask-application-7f89d799d4-8vkw4   1/1     Running     0          4s
+redis-pod-1                          1/1     Running     0          18m
+redis-pod-2                          1/1     Running     0          18m
+
+
+➜  23082024 kubectl get deployments -n p-vkim            
+NAME                READY   UP-TO-DATE   AVAILABLE   AGE
+flask-application   1/1     1            1           4m31s
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+6. **Set image deployment** and re-check probe result. Image: `visionindark/flask-app:prac-v1`.
+
+
+
+kubectl set image deployment/flask-application flask-container=visionindark/flask-app:prac-v1 -n p-vkim
+kubectl get pods -n p-vkim
+kubectl rollout status deployment/flask-application -n p-vkim
+
+deployment "flask-application" successfully rolled out
+
+
+
+
+
+Result:
+ Liveness probe failed: HTTP probe failed with statuscode: 404
+
+
+use resurs field 
+
+
+7. **Expose flask-application deployment** as `NodePort` services and check it with `curl` endpoint: `/load-capability`.
+
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-application-service
+  namespace: p-vkim
+spec:
+  type: NodePort
+  selector:
+    app: flask-application
+  ports:
+  - port: 5000
+    targetPort: 5000
+    nodePort: 30000  # You can specify a port in the range 30000-32767, or leave it out to let Kubernetes choose automatically
+
+
+➜  23082024 k get service -n p-vkim          
+NAME                        TYPE       CLUSTER-IP    EXTERNAL-IP   PORT(S)          AGE
+flask-application-service   NodePort   10.233.7.51   <none>        5000:30000/TCP   3m15s
+
+
+
+
+
+8. **Create deployment** `frontend-application` with image `nvrckdown/something` on port 80. Pod has to be deployed to `node1` with affinity rule. Check corresponding labels. Check status with liveness probe with `tcpSocket` method.
+
+
+###
+frontend-application-deployment.yaml
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-application
+  namespace: p-vkim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend-application
+  template:
+    metadata:
+      labels:
+        app: frontend-application
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                - node1
+      containers:
+      - name: frontend-container
+        image: nvrckdown/something
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+
+
+Current k8s platform is deployed :
+  OS Image:                   Ubuntu 22.04.4 LTS
+  Operating System:           linux
+  Architecture:               amd64
+  Container Runtime Version:  containerd://1.7.16
+
+
+3082024 docker images | grep something
+nvrbckdown/something                                               latest    f264e769fae9   6 months ago    192MB
+➜  23082024 docker run -p 8080:80 nvrbckdown/something                    
+WARNING: The requested image's platform (linux/arm64) does not match the detected host platform (linux/amd64/v3) and no specific platform was requested
+exec /docker-entrypoint.sh: exec format error
+#Задание невозможно выполнить тк платформа не поддерживается 
+
+9. **Expose both deployments** created earlier.
+
+
+###
+flask-application-service
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-application-service
+  namespace: p-vkim
+spec:
+  selector:
+    app: flask-application
+  ports:
+  - protocol: TCP
+    port: 5000        
+    targetPort: 5000  
+    nodePort: 30001   
+  type: NodePort 
+
+
+###
+frontend-application-service.yaml
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-application-service
+  namespace: p-vkim
+spec:
+  selector:
+    app: frontend-application
+  ports:
+  - protocol: TCP
+    port: 80         
+    targetPort: 80   
+    nodePort: 30002  
+  type: NodePort
+
+
+###
+Check services
+kubectl get svc -n p-vkim
+
+
+➜  23082024 k get svc -n p-vkim                 
+NAME                           TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)          AGE
+flask-application-service      NodePort   10.233.7.51     <none>        5000:30000/TCP   111m
+frontend-application-service   NodePort   10.233.43.210   <none>        5000:30002/TCP   31s
+
+###
+Port forward
+kubectl port-forward svc/flask-application-service 5000:5000 -n p-vkim
+
+
+➜  ###
+ k logs flask-application-f66997f5-mt242 -n p-vkim 
+
+ * Environment: production
+   WARNING: This is a development server. Do not use it in a production deployment.
+   Use a production WSGI server instead.
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://10.233.75.48:5000
+Press CTRL+C to quit
+65.109.137.203 - - [24/Aug/2024 14:15:40] "GET /domain HTTP/1.1" 404 -
+65.109.137.203 - - [24/Aug/2024 14:15:45] "GET /domain HTTP/1.1" 404 -
+65.109.137.203 - - [24/Aug/2024 14:15:50] "GET /domain HTTP/1.1" 404 -
+
+###
+➜ kubectl logs frontend-application-757d8f9849-cffq8 -n p-vkim
+
+exec /docker-entrypoint.sh: exec format error
+
+
+
+
+10. **Create one ingress manifest**, `flask-application` on `/config` (Exact), `frontend-application` on `/`.
+
+???Можно ли создать ingress манифест без домена?
+
+k get svc ingress-nginx
+
+
+cat ingress-manifest.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: p-vkim
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: XXX
+    http:
+      paths:
+      - path: /config
+        pathType: Exact
+        backend:
+          service:
+            name: flask-application-service
+            port:
+              number: 5000
+      - path: /
+        pathType: Exact
+        backend:
+          service:
+            name: frontend-application-service
+            port:
+               number: 80
+
+
+
+
+
+11. **Create DaemonSet** with image `nginx` pods has to be scheduled on each node. You may check any other daemons for more information.
+
+###
+nginx-daemonset.yaml
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nginx-daemonset
+  namespace: p-vkim
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+
+###
+kubectl get daemonset -n p-vkim
+
+NAME              DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR   AGE
+nginx-daemonset   6         6         6       6            6           <none>          3m12s
+
+
+
+
+➜  kubectl get pods -n p-vkim -l app=nginx -o wide
+NAME                    READY   STATUS    RESTARTS   AGE     IP               NODE    NOMINATED NODE   READINESS GATES
+nginx-daemonset-5xjcz   1/1     Running   0          9m34s   10.233.74.92     node4   <none>           <none>
+nginx-daemonset-6g6rs   1/1     Running   0          9m34s   10.233.75.3      node2   <none>           <none>
+nginx-daemonset-cnrtq   1/1     Running   0          9m34s   10.233.71.29     node3   <none>           <none>
+nginx-daemonset-k29z4   1/1     Running   0          9m34s   10.233.75.97     node6   <none>           <none>
+nginx-daemonset-lpl9t   1/1     Running   0          9m34s   10.233.102.176   node1   <none>           <none>
+nginx-daemonset-spmrp   1/1     Running   0          9m34s   10.233.97.171    node5   <none>           <none>
+
+
+
+
+12. **Create secret** `secret-info` with `ENVIRONMENT`, `LOG_LEVEL`, `GRPC_PORT`, include this secret as env with `"envFrom"` construction on a new deployment with image `nginx`.
+
+echo -n "production" | base64
+
+ENVIRONMENT: production
+LOG_LEVEL : info
+GRPC_PORT : 5332
+
+info:aW5mbw==
+cHJvZHVjdGlvbg==
+NTMzMg==
+
+
+
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: p-vkim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        envFrom:
+        - secretRef:
+            name: secret-info
+        ports:
+        - containerPort: 80
+
+
+
+
+➜  23082024 kubectl exec -it nginx-deployment-5998fd4898-knxkw -n p-vkim -- env
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+HOSTNAME=nginx-deployment-5998fd4898-knxkw
+NGINX_VERSION=1.27.1
+NJS_VERSION=0.8.5
+NJS_RELEASE=1~bookworm
+PKG_RELEASE=1~bookworm
+DYNPKG_RELEASE=2~bookworm
+ENVIRONMENT=production
+GRPC_PORT=5332
+LOG_LEVEL=info
+
+
+
+13. **Create CronJob** with `busybox` which echoes `POD_IP`. Schedule: every minute, completions: 10, parallelism: 2, backoff: 2. Deploy to node with label `cron=job` with `nodeAffinity`.
+
+➜  23082024 kubectl get nodes --show-labels | grep cron                        
+node5         Ready    <none>          22d   v1.30.3   ahmad=maxmudov,beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,cron=job,doston=true,fazliddin=true,kasb=devops,kubernetes.io/arch=amd64,kubernetes.io/hostname=node5,kubernetes.io/os=linux,ravshan=giyosov,yusupov=true
+➜  23082024 kubectl apply -f cronjob-busybox.yaml -n p-vkim
+cronjob.batch/busybox-cronjob created
+➜  23082024 kubectl get cronjobs -n p-vkim                 
+NAME              SCHEDULE    TIMEZONE   SUSPEND   ACTIVE   LAST SCHEDULE   AGE
+busybox-cronjob   * * * * *   <none>     False     0        28s             35s
+
+
+
+
+
+14. **Create RBAC** to list pods, cronjobs, and jobs on your namespace. Verbs: get, list. Check the result.
+
+###
+rolepod-cronjob.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-cronjob-job-reader
+  namespace: p-vkim
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list"]
+
+###
+rolebinding-job.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bind-pod-cronjob-job-reader
+  namespace: p-vkim
+subjects:
+- kind: ServiceAccount
+  name: vkim-s-acc
+  namespace: p-vkim
+  apiGroup: ""
+roleRef:
+  kind: Role
+  name: pod-cronjob-job-reader
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+kubectl create serviceaccount my-service-account -n p-vkim
+
+
+
+###
+Check
+k auth can-i list pods -n p-vkim --as=system:serviceaccount:p-vkim:vkim-s-acc  
+
+yes
+
+
+
+15. **Create RBAC** for listing nodes with `ClusterRole`, verb: list, resource: node. Check the result.
+
+Lastly, there is a list of node external IPs:
+- 65.109.137.203
+- 65.109.229.231
+
+###
+clusterrole-list-nodes.yaml
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-list-reader
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["list"]
+
+###
+cluster-role-binding.yaml
+
+cat cluster-role-binding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bind-node-list-reader
+subjects:
+- kind: ServiceAccount
+  name: vkim-s-acc
+  namespace: p-vkim
+  apiGroup: ""
+roleRef:
+  kind: ClusterRole
+  name: node-list-reader
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+
+kubectl auth can-i list nodes --as=system:serviceaccount:p-vkim:vkim-s-acc --kubeconfig /path/to/your/kubeconfig
+
+
+
+
+
+
+
+    ➜  23082024 k get nodes                                              
+E0824 21:40:11.353230  635322 memcache.go:265] couldn't get current server API group list: Get "https://65.109.137.203:6443/api?timeout=32s": dial tcp 65.109.137.203:6443: connect: connection refused
+E0824 21:40:11.440318  635322 memcache.go:265] couldn't get current server API group list: Get "https://65.109.137.203:6443/api?timeout=32s": dial tcp 65.109.137.203:6443: connect: connection refused
+E0824 21:40:12.649858  635322 memcache.go:265] couldn't get current server API group list: Get "https://65.109.137.203:6443/api?timeout=32s": dial tcp 65.109.137.203:6443: connect: connection refused
+E0824 21:40:12.781380  635322 memcache.go:265] couldn't get current server API group list: Get "https://65.109.137.203:6443/api?timeout=32s": dial tcp 65.109.137.203:6443: connect: connection refused
+E0824 21:40:12.913743  635322 memcache.go:265] couldn't get current server API group list: Get "https://65.109.137.203:6443/api?timeout=32s": dial tcp 65.109.137.203:6443: connect: connection refused
+The connection to the server 65.109.137.203:6443 was refused - did you specify the right host or port?
+
+###
+Output:
+
+На 1м IP (65.109.137.203) такой вывод: 
+
+kubectl auth can-i list nodes --as=system:serviceaccount:p-vkim:vkim-s-acc --kubeconfig /home/system/.kube/config-k8study-23082024
+
+E0824 21:42:40.386694  640245 memcache.go:265] couldn't get current server API group list: Get "https://65.109.137.203:6443/api?timeout=32s": dial tcp 65.109.137.203:6443: connect: connection refused
+E0824 21:42:40.589435  640245 memcache.go:265] couldn't get current server API group list: Get "https://65.109.137.203:6443/api?timeout=32s": dial tcp 65.109.137.203:6443: connect: connection refused
+Warning: the server doesn't have a resource type 'nodes'
+
+The connection to the server 65.109.137.203:6443 was refused - did you specify the right host or port?
+
+###
+На 2м IP (65.109.229.231) такой вывод: 
+
+kubectl auth can-i list nodes --as=system:serviceaccount:p-vkim:vkim-s-acc --kubeconfig /home/system/.kube/config-k8study-23082024
+
+Warning: resource 'nodes' is not namespace scoped
+
+yes
