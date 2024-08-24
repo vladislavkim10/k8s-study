@@ -5,7 +5,7 @@ Covered topics:
  
 2. Listing Node Labels
 
-3. Namespace Specification for Kubernetes Manifests**:
+3. Namespace Specification for Kubernetes Manifests
  
 4. ConfigMap Creation
  
