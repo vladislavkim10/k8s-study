@@ -1,0 +1,987 @@
+
+
+1. **Create a namespace and service account:**
+
+   - Create a namespace `p-NAME`.
+
+   
+k create ns vkim
+kubectl config set-context --current --namespace=vkim
+
+# service-account.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sa-vkim
+  namespace: vkim
+
+
+   - Configure roles, rolebindings, and permissions (get, list, create, delete for pod and deployment resources).
+
+
+# role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: vkim
+  name: role-vkim
+rules:
+- apiGroups: [""]
+  resources: ["pods", "deployments"]
+  verbs: ["get", "list", "create", "delete"]
+
+
+
+
+# rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rolebinding-vkim
+  namespace: vkim
+subjects:
+- kind: ServiceAccount
+  name: sa-vkim
+  namespace: vkim
+roleRef:
+  kind: Role
+  name: role-vkim
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+######
+SKIP
+######
+
+   - Create a config file and a Dockerfile with the Kubernetes CLI and config.
+
+######
+SKIP
+######
+
+   - Deploy a pod in Kubernetes from the Dockerfile, test pod commands.
+
+
+
+
+
+
+
+
+
+
+
+
+
+2. **Create Nginx deployment:**
+   - Deploy Nginx with two replicas.
+
+# nginx-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: vkim
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+
+###
+   - Expose port 80 using a NodePort service.
+
+# nginx-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: vkim
+spec:
+  type: NodePort
+  selector:
+    app: nginx 
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+    nodePort: 30000
+
+
+   - Show all elements (endpoints, etc.).
+06092024 k get service nginx-service -n vkim
+NAME            TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+nginx-service   NodePort   10.233.21.249   <none>        80:30000/TCP   3m5s
+
+
+➜  06092024 k get endpoints nginx-service -n vkim  
+NAME            ENDPOINTS                          AGE
+nginx-service   10.233.74.15:80,10.233.88.205:80   4m22s
+
+
+
+
+  06092024 kubectl describe service nginx-service -n vkim
+
+Name:                     nginx-service
+Namespace:                vkim
+Labels:                   <none>
+Annotations:              <none>
+Selector:                 app=nginx
+Type:                     NodePort
+IP Family Policy:         SingleStack
+IP Families:              IPv4
+IP:                       10.233.21.249
+IPs:                      10.233.21.249
+Port:                     <unset>  80/TCP
+TargetPort:               80/TCP
+NodePort:                 <unset>  30000/TCP
+Endpoints:                10.233.74.15:80,10.233.88.205:80
+Session Affinity:         None
+External Traffic Policy:  Cluster
+Events:                   <none>
+
+
+
+   - Access Nginx through the NodePort.
+
+root@nginx-deployment-576c6b7b6-nbmcr:/# curl http://10.0.1.2:30000 
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+
+root@nginx-deployment-576c6b7b6-nbmcr:/# curl http://10.0.1.7:30000 
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+
+
+
+3. **Create Redis pods:**
+   - Deploy two Redis pods.
+   - Check readiness using TCP socket type (Redis port 6379).
+   - Deploy to a specific node with affinity rules.
+
+# redis-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+  namespace: vkim
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: redis
+                operator: In
+                values:
+                - not-true
+      containers:
+      - name: redis
+        image: redis:latest
+        ports:
+        - containerPort: 6379
+        readinessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+
+
+  
+                
+
+
+
+
+
+
+Expose redis pods:
+# redis-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: vkim
+spec:
+  selector:
+    app: redis
+  ports:
+  - protocol: TCP
+    port: 6379  
+    targetPort: 6379
+
+
+
+
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+
+
+➜  06092024 kubectl exec -it -n vkim redis-deployment-5f54c55577-44tvs -- redis-cli
+
+127.0.0.1:6379> PING
+PONG
+
+
+➜  06092024 kubectl get nodes --show-labels | grep redis                           
+node04          Ready    <none>          4h41m   v1.30.4   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=node04,kubernetes.io/os=linux,redis=not-true
+node05          Ready    <none>          4h41m   v1.30.4   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=node05,kubernetes.io/os=linux,redis=not-true
+
+
+redis-deployment-5f54c55577-44tvs   1/1     Running   0          12m   10.233.88.207   node03   <none>           <none>
+redis-deployment-5f54c55577-vmpt5   1/1     Running   0          12m   10.233.74.21    node05   <none>           <none>
+
+
+
+# redis-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-deployment
+  namespace: vkim
+spec:
+  replicas: 2  # Two Redis pods
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: redis  # Use the redis label
+                operator: In
+                values:
+                - "not-true"  # Only place on nodes with redis=not-true
+      containers:
+      - name: redis
+        image: redis:latest
+        ports:
+        - containerPort: 6379
+        readinessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+
+
+
+
+
+
+
+
+
+
+
+4. **ConfigMap creation:**
+   - Create a ConfigMap with a message `Proxima Uacademy DevOps Course`.
+
+# configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vkim-configmap
+  namespace: vkim
+data:
+  message: "Proxima Uacademy DevOps Course"
+
+
+
+➜  06092024 k get configmap vkim-configmap
+NAME             DATA   AGE
+vkim-configmap   1      25s
+
+➜  06092024 kubectl describe configmap vkim-configmap -n vkim
+
+Name:         vkim-configmap
+Namespace:    vkim
+Labels:       <none>
+Annotations:  <none>
+
+Data
+====
+message:
+----
+Proxima Uacademy DevOps Course
+
+BinaryData
+====
+
+Events:  <none>
+
+
+
+5. **Create frontend deployment:**
+   - Deploy a frontend app (`visionindark/2048-react:v1`) on port 3000 with resource limits (CPU, memory).
+   - Set up a liveness check with `httpGet`.
+
+
+# frontend-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: vkim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: visionindark/2048-react:v1-amd64
+        ports:
+        - containerPort: 3000
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+          requests:
+            memory: "128Mi"
+            cpu: "250m"
+        livenessProbe:
+          httpGet:
+            path: / 
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+
+
+
+Liveness:     http-get http://:3000/ delay=5s timeout=1s period=10s #success=1 #failure=3
+
+
+6. **Ingress for SSL:**
+   - Create an ingress with SSL for the frontend service and configure it using a cluster-issuer.
+
+➜  ~ curl https://vkim.nvrbckdown.uz/
+<!DOCTYPE html><html lang="en"><head><style data-next-hide-fouc="true">body{display:none}</style><noscript data-next-hide-fouc="true"><style>body{display:block}</style></noscript><meta charSet="utf-8"/><title>Play 2048</title><meta name="description" content="Fully-functional 2048 game built in NextJS and TypeScript
+
+
+kubectl get pods -n ingress-nginx
+
+Annotations:          cert-manager.io/cluster-issuer: letsencrypt-prod
+
+
+
+###
+frontend-service.yaml
+###
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service  
+  namespace: vkim         
+spec:
+  selector:
+    app: frontend         
+  ports:
+    - protocol: TCP
+      port: 80            
+      targetPort: 3000     
+  type: ClusterIP
+
+
+
+kubectl delete secret frontend-tls-secret -n p-vkim
+
+###
+frontend-certificate.yaml
+###
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: frontend-tls-cert
+  namespace: p-vkim
+spec:
+  secretName: frontend-tls-secret
+  issuerRef:
+    name: letsencrypt-prod        
+    kind: ClusterIssuer
+  commonName: vkim.nvrbckdown.uz   
+  dnsNames:
+  - vkim.nvrbckdown.uz             
+  duration: 2160h                  
+  renewBefore: 360h                
+
+7. **Nginx pod readiness probe:**
+   - Set up an Nginx pod with a readiness probe on `/` and expose port 80.
+
+# nginx-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+
+### k describe pod nginx-deployment-6d56fd4ccf-tc6sg
+Readiness:      http-get http://:80/ delay=5s timeout=1s period=10s #success=1 #failure=3
+
+##########
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80       
+    targetPort: 80 
+  type: ClusterIP 
+
+
+➜  k8s k get services -n p-vkim
+NAME               TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+frontend-service   ClusterIP   10.233.19.237   <none>        80/TCP         15h
+nginx-service      NodePort    10.233.19.250   <none>        80:30000/TCP   20h
+
+
+
+8. **Another ConfigMap creation:**
+   - Create a ConfigMap with key-value pairs and mount it as a volume.
+
+
+# configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: vkim
+data:
+  my-key: "a"
+  another-key: "a"
+
+
+
+
+9. **Flask app deployment:**
+   - Deploy a Flask app (`nvrbckdown/something:v1`) on port 80 with environment variables and affinity rules.
+   - Check the status with a liveness probe using TCP socket.
+
+
+
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-app-deployment
+  namespace: p-vkim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flask-app
+  template:
+    metadata:
+      labels:
+        app: flask-app
+    spec:
+      containers:
+      - name: flask-app
+        image: nvrbckdown/something:v1
+        ports:
+        - containerPort: 80
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: flask-secret     
+              key: SECRET_KEY         
+        livenessProbe:
+          tcpSocket:
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: "something"
+                operator: In
+                values:
+                - "true"
+
+
+
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+OkY9R3016FJ-lK78oKQvklGrB4LdPACANTng7VMeCtc
+
+k8s kubectl create secret generic flask-secret --from-literal=SECRET_KEY='OkY9R3016FJ-lK78oKQvklGrB4LdPACANTng7VMeCtc' -n p-vkim
+
+
+
+➜  k8s k get pods -n p-vkim -o wide
+NAME                                    READY   STATUS    RESTARTS   AGE    IP                                                                                                                                      NODE     NOMINATED NODE   READINESS GATES
+flask-app-deployment-84ccb665b5-27b59   1/1     Running   0          2m9s   10.233.119                                                                                                                        .61   node01   <none>           <none>
+
+
+
+10. **List nodes in JSON format:**
+    - Get the list of nodes and store the output in a file.
+
+
+kubectl get nodes -o json
+
+
+
+
+11. **Expose deployments:**
+    - Expose the earlier created deployments.
+
+kubectl expose deployment flask-app-deployment --name=flask-app-service --port=80 --target-port=80 --type=ClusterIP -n p-vkim
+
+kubectl expose deployment nginx-deployment --name=nginx-service --port=80 --target-port=80 --type=NodePort -n p-vkim
+
+➜  ~ kgs
+NAME                TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+flask-app-service   ClusterIP   10.233.52.9     <none>        80/TCP         2m55s
+frontend-service    ClusterIP   10.233.19.237   <none>        80/TCP         43h
+nginx-service       NodePort    10.233.19.250   <none>        80:30000/TCP   47h
+
+
+
+
+12. **Ingress manifest creation:**
+    - Create an ingress for the Flask app on `/config` and the frontend app on `/`.
+
+
+
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: p-vkim
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: letsencrypt-prod 
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: vkim.nvrbckdown.uz
+    http:
+      paths:
+      - path: /config
+        pathType: Prefix
+        backend:
+          service:
+            name: flask-app-service
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - vkim.nvrbckdown.uz
+    secretName: frontend-tls-secret
+
+
+
+➜  ~ k get ingress -n p-vkim
+NAME               CLASS    HOSTS                ADDRESS         PORTS     AGE
+app-ingress        <none>   vkim.nvrbckdown.uz                   80, 443   29s
+frontend-ingress   nginx    vkim.nvrbckdown.uz   10.233.18.229   80, 443   29h
+
+
+Check flask-app
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-app-service
+  namespace: p-vkim
+spec:
+  selector:
+    app: flask-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+
+
+
+13. **DaemonSet creation:**
+    - Create a DaemonSet using the Nginx image, ensure pods are scheduled on each node.
+
+kubectl apply -f nginx-daemonset.yaml
+
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nginx-daemonset
+  namespace: p-vkim  
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+
+
+
+14. **Secret creation:**
+    - Create a secret for environment variables (`ENVIRONMENT`, `LOG_LEVEL`, etc.) and use it in a new deployment.
+
+
+kubectl create secret generic app-env-secret \
+  --from-literal=ENVIRONMENT=production \
+  --from-literal=LOG_LEVEL=info \
+  -n p-vkim
+
+
+apiVersion: batch
+kind: CronJob
+metadata:
+  name: echo-ip-cronjob
+  namespace: p-vkim
+spec:
+  schedule: "*/3 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: alpine
+            image: alpine 
+            command:
+            - /bin/sh
+            - -c
+            - echo "Pod IP: $(hostname -i)"
+          restartPolicy: OnFailure
+
+
+
+
+
+
+
+
+
+
+
+
+15. **CronJob creation:**
+    - Create a CronJob with a busybox image that echoes the pod IP every 3 minutes.
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: echo-ip-cronjob
+  namespace: p-vkim
+spec:
+  schedule: "*/3 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: busybox
+            image: busybox:1.28
+            command:
+              - /bin/sh
+              - "-c"
+              - "echo Pod IP: $(hostname -i)"
+          restartPolicy: OnFailure
+
+
+➜  k8s kubectl get cronjobs -n p-vkim
+
+NAME              SCHEDULE      TIMEZONE   SUSPEND   ACTIVE   LAST SCHEDULE   AGE
+echo-ip-cronjob   */3 * * * *   <none>     False     0        <none>          19s
+
+
+➜  k8s k get pods -n p-vkim -o wide
+NAME                                    READY   STATUS      RESTARTS   AGE     IP              NODE     NOMINATED NODE   READINESS GATES
+echo-ip-cronjob-28769238-bmbkn          0/1     Completed   0          7m57s   10.233.88.195   node03   <none>           <none>
+echo-ip-cronjob-28769241-w4fvw          0/1     Completed   0          4m57s   10.233.88.251   node03   <none>           <none>
+echo-ip-cronjob-28769244-jj52t          0/1     Completed   0          117s    10.233.88.239   node03   <none> 
+
+
+k8s kubectl logs echo-ip-cronjob-28769244-jj52t -n p-vkim
+Pod IP: 10.233.88.239
+
+
+Stop cronjob:
+kubectl patch cronjob echo-ip-cronjob -n p-vkim -p '{"spec" : {"suspend" : true}}'
+
+
+
+16. **RBAC creation:**
+    - Create RBAC for listing pods, cronjobs, and jobs, with permission to get, list, and check.
+
+###role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-cronjob-job-role
+  namespace: p-vkim  
+rules:
+- apiGroups: [""]  # "" indicates the core API group (for Pods)
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["batch"]  
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+
+
+
+###rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-cronjob-job-rolebinding
+  namespace: p-vkim 
+subjects:
+- kind: User
+  name: vkim
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: pod-cronjob-job-role
+  apiGroup: rbac.authorization.k8s.io
+
+
+
+
+
+➜  k8s kubectl auth can-i list pods -n p-vkim --as vkim
+yes
+➜  k8s kubectl auth can-i list pods -n p-vkim --as vkim
+yes
+➜  k8s kubectl auth can-i list pods -n p-vkim --as vkim
+yes
+
+
+17. **Nginx deployment with NetworkPolicy:**
+    - Create an Nginx deployment with two replicas, expose it via a ClusterIP service on port 80.
+    - Create a NetworkPolicy that allows access only from a pod with the label `access: granted` and IP `192.168.10.10`.
+
+
+###nginx-deployment.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: p-vkim  # Use your desired namespace
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  namespace: p-vkim
+spec:
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+
+
+
+###Network-policy:
+nginx-networkpolicy.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-allow-access
+  namespace: p-vkim  
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx  
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          access: granted
+    - ipBlock:
+        cidr: 192.168.10.10/32
+    ports:
+    - protocol: TCP
+      port: 80 
+
+
+
+It should have different IP address:
+test-pod                                1/1     Running     0          21s    10.233.88.206   node03   <none>           <none>
+
+This test pod should have IP 192.168.10.10
+How can I change it
+
+kubectl run test-pod --image=busybox --labels="access=granted" -n p-vkim --command -- sleep 3600
+
+
+k8s kubectl exec -it -c test-pod -n p-vkim -- bash
+
+
+
+➜  k8s kubectl exec -it test-pod2 -n p-vkim -- curl nginx-service:80
+\
+>
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+
+###
+test-pod2                               1/1     Running     0          87s     10.233.74.35    node05   <none>           <none>            access=granted
+
+
+
+
+18. **Redis pod with persistent storage:**
+    - Create a Redis pod using the `redis:alpine` image with an emptyDir volume and mount it at `/data/redis`.
+
+
+###
+redis-pod.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis-pod
+  namespace: p-vkim
+spec:
+  containers:
+  - name: redis
+    image: redis:alpine
+    ports:
+    - containerPort: 6379
+    volumeMounts:
+    - mountPath: /data/redis
+      name: redis-data
+  volumes:
+  - name: redis-data
+    emptyDir: {}
+
+
+####
+
+Volumes:
+  redis-data:
+    Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+    Medium:
+    SizeLimit:  <unset>
+  kube-api-access-m79hg:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    ConfigMapOptional:       <nil>
+    DownwardAPI:             true
+
+###
+Access redis cli
+
+kubectl exec -it redis-pod -n p-vkim -- redis-cli
+
+127.0.0.1:6379>
