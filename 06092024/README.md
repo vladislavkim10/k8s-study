@@ -1,4 +1,4 @@
-# k8s-study-exam-23/08/2024
+# k8s-study-exam-06/09/2024
 Tasks:
 
 1. **Create a namespace and service account
